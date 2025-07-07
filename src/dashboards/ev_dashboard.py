@@ -47,7 +47,7 @@ st.markdown("""
 @st.cache_data
 def load_data():
     """Load and preprocess the electric vehicle dataset"""
-    df = pd.read_csv('electric_vehicles_spec_2025.csv.csv')
+    df = pd.read_csv('data/raw/electric_vehicles_spec_2025.csv.csv')
     
     # Data cleaning
     numeric_columns = [

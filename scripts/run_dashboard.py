@@ -17,7 +17,7 @@ def main():
     try:
         # Run the Streamlit dashboard
         subprocess.run([
-            sys.executable, "-m", "streamlit", "run", "ev_dashboard.py",
+            sys.executable, "-m", "streamlit", "run", "src/dashboards/ev_streamlit_dashboard.py",
             "--server.port", "8501",
             "--server.address", "localhost",
             "--browser.gatherUsageStats", "false"

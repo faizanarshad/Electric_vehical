@@ -200,6 +200,14 @@ python ev_gradio_dashboard.py
 git clone <repository-url>
 cd Electric_vehical
 
+# Run automatic setup
+python setup.py
+
+# Launch the project
+python run_project.py
+```
+cd Electric_vehical
+
 # Install all dependencies
 pip install -r requirements.txt
 pip install -r dashboard_requirements.txt

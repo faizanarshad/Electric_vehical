@@ -155,7 +155,7 @@ st.markdown("""
 def load_data():
     """Load and cache data efficiently"""
     try:
-        df = pd.read_csv('electric_vehicles_spec_2025.csv.csv')
+        df = pd.read_csv('data/raw/electric_vehicles_spec_2025.csv.csv')
         
         # Data cleaning and preprocessing
         numeric_columns = [

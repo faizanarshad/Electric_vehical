@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 
 # Load and preprocess data at the top
 def load_data():
-    df = pd.read_csv('electric_vehicles_spec_2025.csv.csv')
+    df = pd.read_csv('data/raw/electric_vehicles_spec_2025.csv.csv')
     numeric_columns = [
         'top_speed_kmh', 'battery_capacity_kWh', 'number_of_cells', 'torque_nm',
         'efficiency_wh_per_km', 'range_km', 'acceleration_0_100_s', 
