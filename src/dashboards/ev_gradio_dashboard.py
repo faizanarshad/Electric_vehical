@@ -15,8 +15,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 import warnings
 warnings.filterwarnings('ignore')
+import functools
+import argparse
 
 # Load and preprocess data
+@functools.lru_cache(maxsize=1)
 def load_data():
     """Load and cache data efficiently"""
     try:
@@ -48,25 +51,41 @@ def load_data():
 df = load_data()
 
 # AI Analysis Functions
-def perform_clustering(df, n_clusters=4):
-    """Perform K-means clustering on EV data"""
+@functools.lru_cache(maxsize=8)
+def get_kmeans_model(n_clusters):
+    df = load_data()
     features = ['range_km', 'top_speed_kmh', 'battery_capacity_kWh', 'efficiency_wh_per_km']
     data = df[features].dropna()
     scaler = StandardScaler()
     scaled_data = scaler.fit_transform(data)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    clusters = kmeans.fit_predict(scaled_data)
+    kmeans.fit(scaled_data)
+    return scaler, kmeans
+
+def perform_clustering(df, n_clusters=4):
+    """Perform K-means clustering on EV data"""
+    features = ['range_km', 'top_speed_kmh', 'battery_capacity_kWh', 'efficiency_wh_per_km']
+    data = df[features].dropna()
+    scaler, kmeans = get_kmeans_model(n_clusters)
+    scaled_data = scaler.transform(data)
+    clusters = kmeans.predict(scaled_data)
     data = data.copy()
     data['cluster'] = clusters
     return data
 
-def predict_range(battery_capacity, efficiency):
-    """Predict range based on battery capacity and efficiency"""
+@functools.lru_cache(maxsize=1)
+def get_regression_model():
+    df = load_data()
     model_data = df[['battery_capacity_kWh', 'efficiency_wh_per_km', 'range_km']].dropna()
     X = model_data[['battery_capacity_kWh', 'efficiency_wh_per_km']]
     y = model_data['range_km']
     model = LinearRegression()
     model.fit(X, y)
+    return model, X, y
+
+def predict_range(battery_capacity, efficiency):
+    """Predict range based on battery capacity and efficiency"""
+    model, X, y = get_regression_model()
     prediction = model.predict([[battery_capacity, efficiency]])
     r2_score = model.score(X, y)
     return prediction[0], r2_score
@@ -253,10 +272,7 @@ def create_prediction_analysis(battery_capacity, efficiency):
     x_range = np.linspace(30, 150, 20)
     y_range = np.linspace(100, 300, 20)
     X, Y = np.meshgrid(x_range, y_range)
-    model = LinearRegression()
-    X_train = model_data[['battery_capacity_kWh', 'efficiency_wh_per_km']]
-    y_train = model_data['range_km']
-    model.fit(X_train, y_train)
+    model, X_train, y_train = get_regression_model()
     Z = model.predict(np.column_stack([X.ravel(), Y.ravel()])).reshape(X.shape)
     
     fig_surface = go.Figure(data=[go.Surface(x=X, y=Y, z=Z, colorscale='viridis')])
@@ -330,6 +346,11 @@ def create_advanced_analytics():
 def create_interactive_explorer(brands, segments, min_range, min_speed):
     """Create interactive explorer visualizations"""
     filtered_df = df.copy()
+    # Ensure brands and segments are lists for .isin
+    if brands is not None and not isinstance(brands, list):
+        brands = list(brands)
+    if segments is not None and not isinstance(segments, list):
+        segments = list(segments)
     if brands:
         filtered_df = filtered_df[filtered_df['brand'].isin(brands)]
     if segments:
@@ -338,7 +359,9 @@ def create_interactive_explorer(brands, segments, min_range, min_speed):
         (filtered_df['range_km'] >= min_range) &
         (filtered_df['top_speed_kmh'] >= min_speed)
     ]
-    
+    # Ensure filtered_df is a DataFrame
+    if not isinstance(filtered_df, pd.DataFrame):
+        filtered_df = pd.DataFrame(filtered_df)
     # 2D scatter
     fig_scatter = px.scatter(
         filtered_df, x='top_speed_kmh', y='range_km',
@@ -353,7 +376,6 @@ def create_interactive_explorer(brands, segments, min_range, min_speed):
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)'
     )
-    
     # 3D scatter
     fig_3d = px.scatter_3d(
         filtered_df, x='battery_capacity_kWh', y='range_km', z='top_speed_kmh',
@@ -365,24 +387,20 @@ def create_interactive_explorer(brands, segments, min_range, min_speed):
         title_font_size=20,
         title_font_color='#1e3c72'
     )
-    
     # Summary
     summary = f"""
     ## 🔍 Data Explorer Results
-    
     **Filtered Data Summary:**
     - 📊 **Total Vehicles**: {len(filtered_df)}
     - 🔋 **Average Range**: {filtered_df['range_km'].mean():.0f} km
     - ⚡ **Average Battery**: {filtered_df['battery_capacity_kWh'].mean():.1f} kWh
     - 🏁 **Average Speed**: {filtered_df['top_speed_kmh'].mean():.0f} km/h
-    
     **Top Models by Range:**
     """
-    
-    top_models = filtered_df.nlargest(5, 'range_km')[['brand', 'model', 'range_km']]
-    for _, row in top_models.iterrows():
-        summary += f"- {row['brand']} {row['model']}: {row['range_km']:.0f} km\n"
-    
+    if isinstance(filtered_df, pd.DataFrame) and not filtered_df.empty:
+        top_models = filtered_df.nlargest(5, 'range_km')[['brand', 'model', 'range_km']]
+        for _, row in top_models.iterrows():
+            summary += f"- {row['brand']} {row['model']}: {row['range_km']:.0f} km\n"
     return fig_scatter, fig_3d, summary
 
 # Create Gradio interface with modern design
@@ -391,144 +409,169 @@ def create_dashboard():
     
     # Modern CSS styling
     custom_css = """
-    .gradio-container {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-        padding: 2rem;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    
-    .main-header {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
-        padding: 2.5rem;
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.15);
-        text-align: center;
-        color: white;
-        border: 1px solid rgba(255,255,255,0.1);
-    }
-    
-    .main-header h1 {
-        font-size: 3.5rem;
-        font-weight: 800;
-        margin: 0;
-        text-shadow: 2px 2px 8px rgba(0,0,0,0.3);
-        background: linear-gradient(45deg, #ffffff, #e0e7ff);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-    }
-    
-    .main-header p {
-        font-size: 1.3rem;
-        margin: 1rem 0 0 0;
-        opacity: 0.95;
-        font-weight: 300;
-    }
-    
-    .metric-card {
-        background: rgba(255, 255, 255, 0.98);
-        border-radius: 20px;
-        padding: 2rem;
-        margin: 1rem 0;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-        border: 1px solid rgba(255,255,255,0.2);
-        backdrop-filter: blur(10px);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 12px 40px rgba(0,0,0,0.15);
-    }
-    
-    .gradio-tab-nav {
-        background: rgba(255,255,255,0.1) !important;
-        border-radius: 15px !important;
-        padding: 0.5rem !important;
-        margin: 1rem 0 !important;
-        backdrop-filter: blur(10px) !important;
-    }
-    
-    .gradio-tab-nav button {
-        background: rgba(255,255,255,0.8) !important;
-        border-radius: 12px !important;
-        border: none !important;
-        padding: 1rem 2rem !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
-        margin: 0 0.5rem !important;
-        color: #1e3c72 !important;
-    }
-    
-    .gradio-tab-nav button:hover {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
-        color: white !important;
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(30,60,114,0.3) !important;
-    }
-    
-    .gradio-tab-nav button.selected {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
-        color: white !important;
-        box-shadow: 0 6px 20px rgba(30,60,114,0.3) !important;
-    }
-    
-    .gradio-button {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
-        border: none !important;
-        border-radius: 12px !important;
-        padding: 1rem 2rem !important;
-        font-weight: 600 !important;
-        color: white !important;
-        transition: all 0.3s ease !important;
-        box-shadow: 0 4px 15px rgba(30,60,114,0.2) !important;
-    }
-    
-    .gradio-button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 25px rgba(30,60,114,0.3) !important;
-    }
-    
-    .gradio-input, .gradio-textbox, .gradio-slider, .gradio-dropdown {
-        border-radius: 12px !important;
-        border: 2px solid rgba(30,60,114,0.1) !important;
-        background: rgba(255,255,255,0.95) !important;
-        backdrop-filter: blur(10px) !important;
-    }
-    
-    .gradio-input:focus, .gradio-textbox:focus, .gradio-slider:focus, .gradio-dropdown:focus {
-        border-color: #1e3c72 !important;
-        box-shadow: 0 0 0 3px rgba(30,60,114,0.1) !important;
-    }
-    
-    .gradio-plot {
-        background: rgba(255,255,255,0.98) !important;
-        border-radius: 20px !important;
-        padding: 1.5rem !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1) !important;
-        border: 1px solid rgba(255,255,255,0.2) !important;
-        backdrop-filter: blur(10px) !important;
-    }
-    
-    .gradio-markdown {
-        background: rgba(255,255,255,0.98) !important;
-        border-radius: 20px !important;
-        padding: 2rem !important;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.1) !important;
-        border: 1px solid rgba(255,255,255,0.2) !important;
-        backdrop-filter: blur(10px) !important;
-    }
-    
-    .gradio-row {
-        margin: 1rem 0 !important;
-    }
-    
-    .gradio-column {
-        padding: 0.5rem !important;
-    }
-    """
+.gradio-container {
+    background: linear-gradient(120deg, #f8fafc 0%, #e0e7ff 100%);
+    min-height: 100vh;
+    padding: 2.5rem 1rem 1.5rem 1rem;
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.main-header {
+    background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
+    padding: 2.5rem 1rem;
+    border-radius: 24px;
+    margin-bottom: 2.5rem;
+    box-shadow: 0 12px 40px rgba(30,60,114,0.10);
+    text-align: center;
+    color: white;
+    border: 1px solid rgba(255,255,255,0.12);
+}
+
+.main-header h1 {
+    font-size: 3.8rem;
+    font-weight: 900;
+    margin: 0;
+    letter-spacing: -2px;
+    text-shadow: 2px 2px 8px rgba(30,60,114,0.10);
+    background: linear-gradient(45deg, #fff, #e0e7ff 80%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.main-header p {
+    font-size: 1.35rem;
+    margin: 1.2rem 0 0 0;
+    opacity: 0.97;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+}
+
+.metric-card {
+    background: rgba(255, 255, 255, 0.99);
+    border-radius: 22px;
+    padding: 2.2rem 1.5rem;
+    margin: 1.2rem 0;
+    box-shadow: 0 8px 32px rgba(30,60,114,0.08);
+    border: 1px solid rgba(30,60,114,0.07);
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+.metric-card:hover {
+    transform: translateY(-6px) scale(1.01);
+    box-shadow: 0 16px 48px rgba(30,60,114,0.13);
+}
+
+.gradio-tab-nav {
+    background: rgba(30,60,114,0.07) !important;
+    border-radius: 18px !important;
+    padding: 0.7rem !important;
+    margin: 1.2rem 0 !important;
+    backdrop-filter: blur(8px) !important;
+}
+.gradio-tab-nav button {
+    background: rgba(255,255,255,0.92) !important;
+    border-radius: 14px !important;
+    border: none !important;
+    padding: 1.1rem 2.2rem !important;
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+    transition: all 0.3s !important;
+    margin: 0 0.6rem !important;
+    color: #1e3c72 !important;
+    letter-spacing: 0.5px;
+}
+.gradio-tab-nav button:hover {
+    background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
+    color: #fff !important;
+    transform: translateY(-2px) scale(1.03) !important;
+    box-shadow: 0 8px 24px rgba(30,60,114,0.13) !important;
+}
+.gradio-tab-nav button.selected {
+    background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
+    color: #fff !important;
+    box-shadow: 0 8px 24px rgba(30,60,114,0.13) !important;
+}
+
+.gradio-button {
+    background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%) !important;
+    border: none !important;
+    border-radius: 14px !important;
+    padding: 1.1rem 2.2rem !important;
+    font-weight: 700 !important;
+    color: #fff !important;
+    font-size: 1.1rem !important;
+    transition: all 0.3s !important;
+    box-shadow: 0 4px 15px rgba(30,60,114,0.10) !important;
+}
+.gradio-button:hover {
+    transform: translateY(-2px) scale(1.03) !important;
+    box-shadow: 0 12px 32px rgba(30,60,114,0.15) !important;
+}
+
+.gradio-input, .gradio-textbox, .gradio-slider, .gradio-dropdown {
+    border-radius: 14px !important;
+    border: 2px solid rgba(30,60,114,0.10) !important;
+    background: rgba(255,255,255,0.98) !important;
+    font-size: 1.08rem !important;
+    padding: 0.7rem 1rem !important;
+    backdrop-filter: blur(8px) !important;
+}
+.gradio-input:focus, .gradio-textbox:focus, .gradio-slider:focus, .gradio-dropdown:focus {
+    border-color: #2a5298 !important;
+    box-shadow: 0 0 0 3px rgba(30,60,114,0.10) !important;
+}
+
+.gradio-plot {
+    background: rgba(255,255,255,0.99) !important;
+    border-radius: 22px !important;
+    padding: 1.7rem !important;
+    box-shadow: 0 8px 32px rgba(30,60,114,0.08) !important;
+    border: 1px solid rgba(30,60,114,0.07) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+.gradio-markdown {
+    background: rgba(255,255,255,0.99) !important;
+    border-radius: 22px !important;
+    padding: 2.2rem !important;
+    box-shadow: 0 8px 32px rgba(30,60,114,0.08) !important;
+    border: 1px solid rgba(30,60,114,0.07) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+.gradio-row {
+    margin: 1.2rem 0 !important;
+}
+.gradio-column {
+    padding: 0.7rem !important;
+}
+
+/* Loading spinner */
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 60px;
+}
+.loading-spinner .spinner {
+    border: 6px solid #e0e7ff;
+    border-top: 6px solid #2a5298;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+    .main-header h1 { font-size: 2.2rem; }
+    .main-header { padding: 1.2rem 0.5rem; }
+    .metric-card { padding: 1.2rem 0.7rem; }
+}
+"""
     
     with gr.Blocks(css=custom_css, theme=gr.themes.Soft()) as demo:
         # Beautiful Header
@@ -709,10 +752,13 @@ def create_dashboard():
 if __name__ == "__main__":
     print("🚗 Starting Modern AI-Powered Electric Vehicle Analysis Dashboard (Gradio)...")
     print("🤖 Loading AI models and machine learning insights...")
-    print("🌐 Dashboard will open in your browser at http://localhost:7861")
+    print("🌐 Dashboard will open in your browser at http://localhost:<PORT>")
     print("⏹️  Press Ctrl+C to stop the dashboard")
     print("-" * 70)
-    
+    # Parse command line arguments for port
+    parser = argparse.ArgumentParser(description="Run Gradio EV Dashboard")
+    parser.add_argument('--port', type=int, default=7861, help='Port to run the dashboard on')
+    args = parser.parse_args()
     # Check dependencies
     print("🔍 Checking dependencies...")
     try:
@@ -725,14 +771,12 @@ if __name__ == "__main__":
         print("💡 Install dependencies with:")
         print("   pip install -r gradio_requirements.txt")
         exit(1)
-    
     print("🚀 Launching modern AI dashboard...")
-    
     # Create and launch the dashboard
     demo = create_dashboard()
     demo.launch(
         server_name="localhost",
-        server_port=7861,
+        server_port=args.port,
         share=False,
         show_error=True,
         quiet=False
